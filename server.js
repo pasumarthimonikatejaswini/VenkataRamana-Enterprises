@@ -772,6 +772,18 @@ async function handleRequest(req, res) {
         });
       }
 
+      if (pathname.startsWith('/api/bills/') && req.method === 'GET') {
+        const billId = pathname.replace('/api/bills/', '');
+        const resBill = await runQuery('SELECT * FROM bills WHERE id = ? OR invNo = ?', [billId, billId]);
+        if (!resBill.rows || resBill.rows.length === 0) {
+          return sendJson(res, 404, { error: 'Invoice not found.' });
+        }
+        const b = resBill.rows[0];
+        let items = [];
+        try { items = JSON.parse(b.itemsJson || '[]'); } catch (e) {}
+        return sendJson(res, 200, { bill: { ...b, items } });
+      }
+
       if (pathname === '/api/bills' && req.method === 'POST') {
         if (!verifyAuthToken(req)) {
           return sendJson(res, 401, { error: 'Unauthorized.' });
@@ -925,6 +937,8 @@ async function handleRequest(req, res) {
   let safePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
   if (safePath === '/' || safePath === '\\') {
     safePath = '/index.html';
+  } else if (safePath === '/invoice' || safePath === '\\invoice') {
+    safePath = '/invoice.html';
   }
 
   const localFilePath = path.join(__dirname, safePath);

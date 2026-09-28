@@ -2375,6 +2375,48 @@
           </div>
         </form>
       </div>
+  </div>
+
+  <!-- WHATSAPP PDF ATTACH GUIDE MODAL -->
+  <div class="modal-overlay" id="wa-pdf-guide-modal">
+    <div class="modal-card" style="max-width: 520px; border: 2px solid #C5A059;">
+      <div class="modal-header" style="background: #FAF8F5;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 1.5rem;">📄</span>
+          <h3 style="font-size: 1.25rem;">Tax Invoice PDF Downloaded</h3>
+        </div>
+        <button class="modal-close-btn" onclick="closeWhatsAppPdfModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 24px;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <div style="font-size: 1rem; font-weight: 800; color: var(--crimson);" id="wa-modal-inv-no">VE-2026-0001.pdf</div>
+          <div style="font-size: 0.82rem; color: var(--text-editorial); margin-top: 4px;">✓ Digitally Signed &amp; Saved to your Downloads Folder</div>
+        </div>
+
+        <div style="background: var(--bg-soft-cream); border: 1px solid var(--divider); border-radius: 8px; padding: 16px; margin-bottom: 22px; font-size: 0.88rem; line-height: 1.6;">
+          <strong style="color: var(--text-charcoal); display: block; margin-bottom: 8px;">📲 How to send PDF in WhatsApp Web:</strong>
+          <ol style="margin-left: 20px; color: var(--text-graphite);">
+            <li style="margin-bottom: 6px;">WhatsApp Web chat is now open in your browser tab.</li>
+            <li style="margin-bottom: 6px;">In the chat box, click the <strong>📎 Paperclip (Attach)</strong> icon.</li>
+            <li style="margin-bottom: 6px;">Select <strong>📄 Document</strong>.</li>
+            <li style="margin-bottom: 4px;">Choose the downloaded file <strong id="wa-modal-filename" style="color: #2E7D32;">VE-XXXX.pdf</strong> from your <em>Downloads</em> folder.</li>
+          </ol>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <button type="button" class="btn btn-whatsapp" style="width: 100%; justify-content: center; padding: 12px; font-size: 0.95rem;" onclick="reopenWhatsAppChat()">
+            💬 Open WhatsApp Chat
+          </button>
+          <div style="display: flex; gap: 10px;">
+            <a id="wa-modal-view-online-btn" href="#" target="_blank" class="btn btn-outline" style="flex: 1; text-align: center; justify-content: center; font-size: 0.85rem;">
+              🌐 View Online Invoice
+            </a>
+            <button type="button" class="btn btn-crimson" style="flex: 1; justify-content: center; font-size: 0.85rem;" onclick="closeWhatsAppPdfModal()">
+              ✓ Done
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -2901,6 +2943,77 @@
       }
     }
 
+    let lastWhatsAppUrl = '';
+
+    function closeWhatsAppPdfModal() {
+      const modal = document.getElementById('wa-pdf-guide-modal');
+      if (modal) modal.classList.remove('active');
+    }
+
+    function showWhatsAppPdfModal(bill) {
+      if (!bill) return;
+      const modal = document.getElementById('wa-pdf-guide-modal');
+      if (!modal) return;
+      const filename = `${bill.invNo}.pdf`;
+      const invNoEl = document.getElementById('wa-modal-inv-no');
+      if (invNoEl) invNoEl.textContent = filename;
+      const fileEl = document.getElementById('wa-modal-filename');
+      if (fileEl) fileEl.textContent = filename;
+      const linkEl = document.getElementById('wa-modal-view-online-btn');
+      if (linkEl) linkEl.href = `/invoice.html?id=${encodeURIComponent(bill.id || bill.invNo)}`;
+      modal.classList.add('active');
+    }
+
+    function reopenWhatsAppChat() {
+      if (lastWhatsAppUrl) {
+        window.open(lastWhatsAppUrl, '_blank');
+      } else if (lastSavedBill) {
+        sendInvoiceOnWhatsApp();
+      }
+    }
+
+    async function getInvoicePdfBlob(bill) {
+      const element = document.getElementById('invoice-print-area');
+      if (!element) return null;
+      const previewCont = document.getElementById('invoice-preview-container');
+      if (previewCont) previewCont.style.display = 'block';
+
+      const filename = `${bill ? bill.invNo : 'Invoice'}.pdf`;
+      const opt = {
+        margin: [5, 5, 5, 5],
+        filename: filename,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, logging: false },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+      };
+
+      try {
+        const pdfBlob = await html2pdf().set(opt).from(element).output('blob');
+        return { pdfBlob, filename };
+      } catch (err) {
+        console.error('Error generating PDF blob:', err);
+        return null;
+      }
+    }
+
+    function downloadPdfBlob(blob, filename) {
+      try {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 1200);
+      } catch (e) {
+        console.error('Blob download error:', e);
+        downloadInvoicePdf();
+      }
+    }
+
     async function generateAndShareToWhatsAppAsPdf() {
       checkAndAutoAddPendingItem();
 
@@ -2952,35 +3065,63 @@
         const data = await res.json();
         if (res.ok && data.success) {
           lastSavedBill = data.bill;
-          renderInvoicePreview(lastSavedBill);
-
-          const previewCont = document.getElementById('invoice-preview-container');
-          if (previewCont) {
-            previewCont.style.display = 'block';
-            previewCont.scrollIntoView({ behavior: 'smooth' });
-          }
-
-          // Generate & download PDF with digital signature
-          setTimeout(() => {
-            downloadInvoicePdf();
-          }, 300);
-
-          // Launch WhatsApp with bill summary
-          setTimeout(() => {
-            sendInvoiceOnWhatsApp();
-          }, 800);
-
-          loadSalesHistory();
         } else {
-          fallbackRenderAndShare(payload);
+          fallbackSaveBillLocally(payload);
         }
       } catch (err) {
-        console.error('Server error during bill generation:', err);
-        fallbackRenderAndShare(payload);
+        console.error('Server save error:', err);
+        fallbackSaveBillLocally(payload);
       }
+
+      renderInvoicePreview(lastSavedBill);
+      const previewCont = document.getElementById('invoice-preview-container');
+      if (previewCont) {
+        previewCont.style.display = 'block';
+        previewCont.scrollIntoView({ behavior: 'smooth' });
+      }
+
+      // Generate the official PDF Blob
+      const pdfData = await getInvoicePdfBlob(lastSavedBill);
+
+      if (pdfData && pdfData.pdfBlob) {
+        const { pdfBlob, filename } = pdfData;
+        const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' });
+
+        // 1. Mobile Web Share API: Directly attaches the PDF document into WhatsApp!
+        if (navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+          try {
+            await navigator.share({
+              files: [pdfFile],
+              title: `Tax Invoice ${lastSavedBill.invNo}`,
+              text: `Tax Invoice ${lastSavedBill.invNo} from VENKATARAMANA ENTERPRISES.\nCustomer: ${lastSavedBill.custName}\nGrand Total: ₹${lastSavedBill.grandTotal}\n✓ Digitally Signed (Signature is not required)`
+            });
+            loadSalesHistory();
+            return;
+          } catch (shareErr) {
+            if (shareErr.name === 'AbortError') {
+              loadSalesHistory();
+              return; // User cancelled OS share drawer
+            }
+            console.warn('Web Share failed, using desktop workflow:', shareErr);
+          }
+        }
+
+        // 2. Desktop Workflow: Automatically download the PDF file to PC
+        downloadPdfBlob(pdfBlob, filename);
+      } else {
+        downloadInvoicePdf();
+      }
+
+      // Open WhatsApp chat with full bill summary & direct online PDF link
+      sendInvoiceOnWhatsApp();
+
+      // Show Desktop WhatsApp PDF attachment instructions modal
+      showWhatsAppPdfModal(lastSavedBill);
+
+      loadSalesHistory();
     }
 
-    function fallbackRenderAndShare(payload) {
+    function fallbackSaveBillLocally(payload) {
       let subtotal = 0;
       payload.items.forEach(it => { subtotal += Number(it.lineTotal) || 0; });
       const taxable = Math.max(0, subtotal - payload.discount);
@@ -3000,14 +3141,6 @@
         grandTotal,
         items: payload.items
       };
-      renderInvoicePreview(lastSavedBill);
-      const previewCont = document.getElementById('invoice-preview-container');
-      if (previewCont) {
-        previewCont.style.display = 'block';
-        previewCont.scrollIntoView({ behavior: 'smooth' });
-      }
-      setTimeout(() => { downloadInvoicePdf(); }, 300);
-      setTimeout(() => { sendInvoiceOnWhatsApp(); }, 800);
     }
 
     async function saveAndGenerateBill() {
@@ -3115,6 +3248,8 @@
     function sendInvoiceOnWhatsApp() {
       if (!lastSavedBill) return;
       const b = lastSavedBill;
+      const invoiceOnlineUrl = `${window.location.origin}/invoice.html?id=${encodeURIComponent(b.id || b.invNo)}`;
+
       let text = `*VENKATARAMANA ENTERPRISES*\n`;
       text += `_ONE STOP SOLUTION FOR BUILDING SOLUTION_\n`;
       text += `D.no: 10-27, Opp. Police Station, Gokavaram - 533286\n`;
@@ -3137,13 +3272,15 @@
       text += `Payment Mode: ${b.paymentMode}\n`;
       text += `--------------------------------\n`;
       text += `✓ Digitally Signed (Signature is not required)\n`;
-      text += `📄 Official Tax Invoice PDF generated.\n`;
+      text += `📄 Official Tax Invoice PDF has been generated.\n`;
+      text += `🌐 View & Download PDF Online:\n${invoiceOnlineUrl}\n`;
+      text += `--------------------------------\n`;
       text += `Thank you for choosing VENKATARAMANA ENTERPRISES!`;
 
       const cleanPhone = (b.custPhone || '').replace(/\D/g, '');
       const targetNumber = cleanPhone.length === 10 ? `91${cleanPhone}` : (cleanPhone.length > 10 ? cleanPhone : '919491945045');
-      const waUrl = `https://wa.me/${targetNumber}?text=${encodeURIComponent(text)}`;
-      window.open(waUrl, '_blank');
+      lastWhatsAppUrl = `https://wa.me/${targetNumber}?text=${encodeURIComponent(text)}`;
+      window.open(lastWhatsAppUrl, '_blank');
     }
 
     function downloadInvoicePdf() {
