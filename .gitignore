@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Environment Variables
+.env
+
+# SQLite Databases & Journals
+data/*.db
+data/*.sqlite
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-journal
+
+# Vercel
+.vercel/
+
+# OS Files
+.DS_Store
+Thumbs.db
