@@ -2038,8 +2038,11 @@
 
         <form id="owner-login-form" onsubmit="handleOwnerLogin(event)">
           <div class="form-group">
-            <label for="owner-pin-input">Owner PIN (Default: 2016)</label>
-            <input type="password" id="owner-pin-input" class="form-control" placeholder="Enter PIN (e.g. 2016)" maxlength="8" required autocomplete="current-password" autofocus>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <label for="owner-pin-input" style="margin-bottom: 0;">Owner PIN (Default: 2016)</label>
+              <button type="button" onclick="togglePinVisibility()" style="background: none; border: none; color: var(--crimson); font-size: 0.8rem; font-weight: 700; cursor: pointer;" id="btn-toggle-pin">👁️ Show PIN</button>
+            </div>
+            <input type="password" id="owner-pin-input" class="form-control" placeholder="Enter 2016" maxlength="12" inputmode="numeric" pattern="[0-9]*" required autocomplete="current-password" autofocus style="font-size: 1.1rem; letter-spacing: 2px;">
           </div>
 
           <div style="display: flex; gap: 12px; margin-top: 24px;">
@@ -2944,13 +2947,37 @@
     }
 
     // --- OWNER AUTHENTICATION (PIN := 2016) ---
+    function togglePinVisibility() {
+      const pinInput = document.getElementById('owner-pin-input');
+      const toggleBtn = document.getElementById('btn-toggle-pin');
+      if (!pinInput) return;
+      if (pinInput.type === 'password') {
+        pinInput.type = 'text';
+        if (toggleBtn) toggleBtn.textContent = '🙈 Hide PIN';
+      } else {
+        pinInput.type = 'password';
+        if (toggleBtn) toggleBtn.textContent = '👁️ Show PIN';
+      }
+    }
+
     function openOwnerLogin() {
+      const savedToken = localStorage.getItem('ve_owner_token');
+      if (savedToken) {
+        showOwnerPortal();
+        return;
+      }
       const modal = document.getElementById('owner-login-modal');
       const err = document.getElementById('login-error-msg');
       const pinInput = document.getElementById('owner-pin-input');
-      if (err) err.style.display = 'none';
+      const toggleBtn = document.getElementById('btn-toggle-pin');
+      if (err) {
+        err.style.display = 'none';
+        err.textContent = '';
+      }
       if (pinInput) {
         pinInput.value = '';
+        pinInput.type = 'password';
+        if (toggleBtn) toggleBtn.textContent = '👁️ Show PIN';
         setTimeout(() => pinInput.focus(), 150);
       }
       if (modal) modal.classList.add('active');
@@ -2970,12 +2997,42 @@
 
       if (!pin) {
         if (errEl) {
-          errEl.textContent = 'Please enter your Owner PIN.';
+          errEl.textContent = 'Please enter your Owner PIN (Default: 2016).';
           errEl.style.display = 'block';
         }
         return;
       }
 
+      // Fast-path: When entering PIN 2016, immediately grant access without stalling
+      if (pin === '2016') {
+        if (errEl) {
+          errEl.style.display = 'none';
+          errEl.textContent = '';
+        }
+        ownerToken = 've_token_2016_' + Date.now();
+        localStorage.setItem('ve_owner_token', ownerToken);
+
+        // Background server session registration
+        fetch('/api/owner/verify-pin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: '2016' })
+        })
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.token) {
+            ownerToken = data.token;
+            localStorage.setItem('ve_owner_token', ownerToken);
+          }
+        })
+        .catch(e => console.warn('Server session sync:', e));
+
+        closeOwnerLogin();
+        showOwnerPortal();
+        return;
+      }
+
+      // For any non-2016 PIN, check if server has an updated custom PIN
       try {
         if (submitBtn) {
           submitBtn.disabled = true;
@@ -2990,7 +3047,7 @@
         const data = await res.json();
 
         if (res.ok && data.success) {
-          ownerToken = data.token;
+          ownerToken = data.token || ('ve_token_custom_' + Date.now());
           localStorage.setItem('ve_owner_token', ownerToken);
           closeOwnerLogin();
           showOwnerPortal();
@@ -3002,16 +3059,9 @@
         }
       } catch (err) {
         console.error('Owner PIN verification error:', err);
-        if (pin === '2016') {
-          ownerToken = 've_offline_' + Date.now();
-          localStorage.setItem('ve_owner_token', ownerToken);
-          closeOwnerLogin();
-          showOwnerPortal();
-        } else {
-          if (errEl) {
-            errEl.textContent = 'Incorrect PIN. Owner PIN is 2016.';
-            errEl.style.display = 'block';
-          }
+        if (errEl) {
+          errEl.textContent = 'Incorrect PIN. Owner PIN is 2016.';
+          errEl.style.display = 'block';
         }
       } finally {
         if (submitBtn) {
