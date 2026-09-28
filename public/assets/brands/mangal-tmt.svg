@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 100" width="100%" height="100%">
+  <rect x="2" y="2" width="276" height="96" rx="8" fill="#FFFFFF" stroke="#E6DFD5" stroke-width="2"/>
+  <rect x="12" y="12" width="6" height="76" rx="3" fill="#C5A059"/>
+  <text x="32" y="44" font-family="'Playfair Display', Georgia, serif" font-size="20" font-weight="800" fill="#C8102E" letter-spacing="1.5">MANGAL TMT</text>
+  <text x="32" y="65" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="11" font-weight="700" fill="#141414" letter-spacing="1">TMT BARS &amp; MASONRY</text>
+  <text x="32" y="82" font-family="'Plus Jakarta Sans', system-ui, sans-serif" font-size="9" font-weight="600" fill="#7A7570">Rebars, Billets &amp; Fly Ash Bricks</text>
+</svg>

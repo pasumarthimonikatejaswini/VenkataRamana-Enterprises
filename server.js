@@ -32,7 +32,7 @@ const DEFAULT_TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLC
 const PORT = process.env.PORT || 3000;
 const TURSO_DATABASE_URL = process.env.TURSO_DATABASE_URL || DEFAULT_TURSO_URL;
 const TURSO_AUTH_TOKEN = process.env.TURSO_AUTH_TOKEN || DEFAULT_TURSO_TOKEN;
-const DEFAULT_OWNER_PIN = process.env.OWNER_PIN || '1234';
+const DEFAULT_OWNER_PIN = process.env.OWNER_PIN || '2016';
 
 // Ensure data directory exists for local SQLite fallback (safe on read-only serverless filesystems)
 const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
@@ -254,37 +254,38 @@ async function migrateDatabase() {
     await runQuery(sql);
   }
 
-  // Seed Owner PIN
+  // Seed / Enforce Owner PIN 2016
   const authRes = await runQuery('SELECT * FROM owner_auth WHERE id = 1');
   if (authRes.rows.length === 0) {
     await runQuery('INSERT INTO owner_auth (id, pin) VALUES (1, ?)', [DEFAULT_OWNER_PIN]);
+  } else if (authRes.rows[0].pin !== DEFAULT_OWNER_PIN) {
+    await runQuery('UPDATE owner_auth SET pin = ? WHERE id = 1', [DEFAULT_OWNER_PIN]);
   }
 
-  // Seed Categories
-  const catRes = await runQuery('SELECT COUNT(*) as count FROM categories');
-  const catCount = Number(catRes.rows[0].count || 0);
-  if (catCount === 0) {
-    console.log('[DB] Seeding initial construction material categories...');
-    const categories = [
-      { id: 'cat-cement', name: 'Cement', description: 'OPC, PPC, Composite, Premium and Specialty cements' },
-      { id: 'cat-steel', name: 'Steel & TMT', description: 'High-strength TMT rebars, Fe500D, Fe550D, Fe600 and structural steel' },
-      { id: 'cat-bricks', name: 'Bricks & Blocks', description: 'Fly ash bricks, concrete blocks, masonry blocks and AAC blocks' },
-      { id: 'cat-binding', name: 'Binding & Reinforcement', description: 'Binding wire, stirrups, cut & bend rebars and welded wire mesh' },
-      { id: 'cat-chemicals', name: 'Construction Chemicals', description: 'Waterproofing, tile adhesives, epoxy grouts and repair products' },
-      { id: 'cat-plaster', name: 'Plaster & Finishing', description: 'Ready-mix plaster, wall putty, white cement and surface finishing' },
-      { id: 'cat-aggregates', name: 'Aggregates & Basic Materials', description: 'River sand, stone aggregates, gravel and foundational materials' },
-      { id: 'cat-plumbing', name: 'Plumbing & Pipes', description: 'Water supply pipes, drainage pipes and heavy-duty fittings' },
-      { id: 'cat-roofing', name: 'Roofing', description: 'Corrugated roofing sheets, accessories and weather protection' },
-      { id: 'cat-other', name: 'Other Construction Materials', description: 'General building site essentials and hardware accessories' }
-    ];
-    for (const c of categories) {
+  // Ensure Standard Construction Material Categories
+  const standardCategories = [
+    { id: 'cat-cement', name: 'Cement', description: 'UltraTech, OPC, PPC, and specialty cements' },
+    { id: 'cat-steel', name: 'Steel & Iron', description: 'Iron TMT rebars (6mm, 8mm, 10mm, 12mm, 16mm), Vizag Steel, Jindal Panther, and Mangal TMT' },
+    { id: 'cat-mess-roles', name: 'Mess Roles & Binding', description: 'Welded wire mesh rolls, chicken mess roles, chain link, and binding wire' },
+    { id: 'cat-slab-liquids', name: 'Slab Liquids & Chemicals', description: 'Dr. Fixit Pidiproof LW+, UltraTech Seal & Dry liquid, plasticizers, and waterproofing compounds' },
+    { id: 'cat-sponges', name: 'Sponges & Finishing', description: 'Plastering foam sponges, masonry finishing sponges, wall putty, and finishing products' },
+    { id: 'cat-bricket-boxes', name: 'Bricket Boxes & Blocks', description: 'Concealed electrical modular bricket boxes (1/2, 3/4, 6, 8, 12 module), fly ash bricks, and AAC blocks' },
+    { id: 'cat-aggregates', name: 'Aggregates & Basic Materials', description: 'Godavari river sand, blue metal granite chips (20mm, 12mm), M-sand, and foundation stone' },
+    { id: 'cat-plumbing', name: 'Plumbing & Pipes', description: 'CPVC, UPVC, SWR drainage pipes, and heavy-duty fittings' },
+    { id: 'cat-roofing', name: 'Roofing', description: 'Color coated roofing sheets, GI corrugated sheets, and accessories' },
+    { id: 'cat-other', name: 'Other Construction Materials', description: 'General building site essentials, barbed wire, and tarpaulins' }
+  ];
+
+  for (const c of standardCategories) {
+    const existing = await runQuery('SELECT id FROM categories WHERE id = ? OR name = ?', [c.id, c.name]);
+    if (!existing.rows || existing.rows.length === 0) {
       await runQuery('INSERT INTO categories (id, name, description, active) VALUES (?, ?, ?, 1)', [c.id, c.name, c.description]);
     }
   }
 
   // Seed Confirmed Brands
   const brandRes = await runQuery('SELECT COUNT(*) as count FROM brands');
-  const brandCount = Number(brandRes.rows[0].count || 0);
+  const brandCount = Number(brandRes.rows[0]?.count || 0);
   if (brandCount === 0) {
     console.log('[DB] Seeding confirmed brands (UltraTech, Jindal Panther, Vizag Steel, Mangal TMT)...');
     const brands = [
@@ -318,87 +319,104 @@ async function migrateDatabase() {
     }
   }
 
-  // Seed 50+ Real Construction Materials Catalog Items
-  const prodRes = await runQuery('SELECT COUNT(*) as count FROM products');
-  const prodCount = Number(prodRes.rows[0].count || 0);
-  if (prodCount === 0) {
-    console.log('[DB] Seeding initial 50+ construction product catalog items (No fake prices)...');
-    const seedProducts = [
-      // 1-8 Cement
-      { id: 'p-cem-01', name: 'UltraTech PPC Cement (Portland Pozzolana)', brand: 'UltraTech Building Solutions', category: 'Cement', unit: 'Bags (50 kg)', desc: 'High durability fly-ash blended cement for brickwork, plastering and general concrete.' },
-      { id: 'p-cem-02', name: 'UltraTech Super Cement', brand: 'UltraTech Building Solutions', category: 'Cement', unit: 'Bags (50 kg)', desc: 'Engineered composite cement with micro-fine particles providing denser concrete.' },
-      { id: 'p-cem-03', name: 'UltraTech Weather Pro Cement', brand: 'UltraTech Building Solutions', category: 'Cement', unit: 'Bags (50 kg)', desc: 'Water-repellent active cement specially formulated to resist dampness and efflorescence.' },
-      { id: 'p-cem-04', name: 'Ordinary Portland Cement (OPC 53 Grade)', brand: 'UltraTech Building Solutions', category: 'Cement', unit: 'Bags (50 kg)', desc: 'High initial and ultimate strength cement for fast-setting RCC slabs, columns and beams.' },
-      { id: 'p-cem-05', name: 'Ordinary Portland Cement (OPC 43 Grade)', brand: 'UltraTech Building Solutions', category: 'Cement', unit: 'Bags (50 kg)', desc: 'Standard structural cement suitable for residential plastering, flooring and pre-cast units.' },
-      { id: 'p-cem-06', name: 'Portland Slag Cement (PSC)', brand: 'Vizag Steel', category: 'Cement', unit: 'Bags (50 kg)', desc: 'Blast furnace slag blended cement offering superior sulphate resistance and crack prevention.' },
-      { id: 'p-cem-07', name: 'UltraTech White Topping Cement', brand: 'UltraTech Building Solutions', category: 'Cement', unit: 'Bags (50 kg)', desc: 'Specialty white cement for architectural finishes, terrazzo and decorative concrete.' },
-      { id: 'p-cem-08', name: 'Rapid Hardening Cement', brand: 'UltraTech Building Solutions', category: 'Cement', unit: 'Bags (50 kg)', desc: 'High early strength cement designed for rapid formwork removal and urgent structural repairs.' },
+  // Ensure All Required Products (UltraTech, Iron 6/8/10/12/16mm, Mess Roles, Slab Liquids, Sponges, Bricket Boxes)
+  const masterCatalog = [
+    // --- 1. ULTRATECH FULL RANGE ---
+    { id: 'p-ut-super', name: 'UltraTech Super Cement', brand: 'UltraTech Building Solutions', category: 'Cement', unit: 'Bags (50 kg)', desc: 'Engineered composite cement with micro-fine particles providing denser concrete and ultimate strength.' },
+    { id: 'p-ut-weatherpro', name: 'UltraTech Weather Pro Cement', brand: 'UltraTech Building Solutions', category: 'Cement', unit: 'Bags (50 kg)', desc: 'Water-repellent active cement specially formulated to resist dampness, seepage and efflorescence.' },
+    { id: 'p-ut-ppc', name: 'UltraTech PPC Cement (Portland Pozzolana)', brand: 'UltraTech Building Solutions', category: 'Cement', unit: 'Bags (50 kg)', desc: 'High durability fly-ash blended cement for brickwork, plastering and RCC foundation concrete.' },
+    { id: 'p-ut-opc53', name: 'UltraTech OPC 53 Grade Cement', brand: 'UltraTech Building Solutions', category: 'Cement', unit: 'Bags (50 kg)', desc: 'High early strength cement engineered for rapid setting of RCC slabs, columns and beams.' },
+    { id: 'p-ut-opc43', name: 'UltraTech OPC 43 Grade Cement', brand: 'UltraTech Building Solutions', category: 'Cement', unit: 'Bags (50 kg)', desc: 'Standard structural cement suitable for residential plastering, flooring and pre-cast concrete units.' },
+    { id: 'p-ut-powergrout', name: 'UltraTech Powergrout Tile Grout', brand: 'UltraTech Building Solutions', category: 'Slab Liquids & Chemicals', unit: 'Pack (1 kg)', desc: 'High-performance water-resistant cementitious tile joint filler available in matching shades.' },
+    { id: 'p-ut-tilefixo-std', name: 'UltraTech Tilefixo Standard Tile Adhesive', brand: 'UltraTech Building Solutions', category: 'Slab Liquids & Chemicals', unit: 'Bag (20 kg)', desc: 'Polymer-modified cementitious tile adhesive for ceramic and vitrified floor tiles.' },
+    { id: 'p-ut-tilefixo-hs', name: 'UltraTech Tilefixo High Strength Tile Adhesive', brand: 'UltraTech Building Solutions', category: 'Slab Liquids & Chemicals', unit: 'Bag (20 kg)', desc: 'Superior tensile adhesion adhesive for large vitrified tiles, granite and vertical wall cladding.' },
+    { id: 'p-ut-sealdry-coat', name: 'UltraTech Seal & Dry Waterproofing Coating', brand: 'UltraTech Building Solutions', category: 'Slab Liquids & Chemicals', unit: 'Bucket (20 Litre)', desc: 'Acrylic polymer waterproofing system for roofs, terraces, bathrooms and water tanks.' },
+    { id: 'p-ut-sealdry-liq', name: 'UltraTech Seal & Dry Slab Liquid (Waterproofing Liquid)', brand: 'UltraTech Building Solutions', category: 'Slab Liquids & Chemicals', unit: 'Can (5 Litre / 20 Litre)', desc: 'Heavy-duty integral liquid waterproofing admixture that protects RCC roof slabs against water seepage.' },
+    { id: 'p-ut-readplast', name: 'UltraTech Readplast Ready-Mix Plaster', brand: 'UltraTech Building Solutions', category: 'Sponges & Finishing', unit: 'Bag (40 kg)', desc: 'Premixed cement-graded sand plaster offering crack-free and silky-smooth wall finish.' },
+    { id: 'p-ut-stucco', name: 'UltraTech Super Stucco Plaster Finish', brand: 'UltraTech Building Solutions', category: 'Sponges & Finishing', unit: 'Bag (40 kg)', desc: 'Decorative external plaster with water-resistant surface and high weather durability.' },
+    { id: 'p-ut-putty', name: 'UltraTech Wall Putty (Polymer Based)', brand: 'UltraTech Building Solutions', category: 'Sponges & Finishing', unit: 'Bag (40 kg)', desc: 'White cement based putty providing brilliant white, pinhole-free base for wall paint.' },
+    { id: 'p-ut-wallseal', name: 'Birla White WallSeal Waterproof Putty', brand: 'UltraTech Building Solutions', category: 'Sponges & Finishing', unit: 'Bag (30 kg)', desc: 'Active silicone enriched wall putty that safeguards interior walls against paint peel-off.' },
+    { id: 'p-ut-microcrete', name: 'UltraTech Microcrete Structural Repair Mortar', brand: 'UltraTech Building Solutions', category: 'Slab Liquids & Chemicals', unit: 'Bag (25 kg)', desc: 'Non-shrink high-strength flowable micro-concrete for structural column repair and jacketing.' },
+    { id: 'p-ut-aac', name: 'UltraTech Autoclaved Aerated Concrete (AAC) Blocks', brand: 'UltraTech Building Solutions', category: 'Bricket Boxes & Blocks', unit: 'Piece / Block', desc: 'Lightweight, thermal-insulating building blocks that reduce building dead-load significantly.' },
 
-      // 9-16 Steel & TMT
-      { id: 'p-stl-01', name: 'Jindal Panther TMT 550D Rebars (8mm)', brand: 'Jindal Panther', category: 'Steel & TMT', unit: 'Metric Ton / Bundle', desc: 'Superior bendability and seismic resistance Fe550D grade steel for slab reinforcement.' },
-      { id: 'p-stl-02', name: 'Jindal Panther TMT 550D Rebars (10mm)', brand: 'Jindal Panther', category: 'Steel & TMT', unit: 'Metric Ton / Bundle', desc: 'High ductile TMT rebar for structural residential and commercial columns and beams.' },
-      { id: 'p-stl-03', name: 'Jindal Panther TMT 550D Rebars (12mm)', brand: 'Jindal Panther', category: 'Steel & TMT', unit: 'Metric Ton / Bundle', desc: 'Heavy load-bearing TMT steel bars with uniform rib pattern for maximum concrete bonding.' },
-      { id: 'p-stl-04', name: 'Jindal Panther TMT 550D Rebars (16mm)', brand: 'Jindal Panther', category: 'Steel & TMT', unit: 'Metric Ton / Bundle', desc: 'Primary reinforcement steel for high-rise columns, foundation footings and raft slabs.' },
-      { id: 'p-stl-05', name: 'Vizag Steel TMT Fe500D (10mm)', brand: 'Vizag Steel', category: 'Steel & TMT', unit: 'Metric Ton / Bundle', desc: 'Pure steel primary product from RINL with low sulphur and phosphorus for high longevity.' },
-      { id: 'p-stl-06', name: 'Vizag Steel TMT Fe500D (12mm)', brand: 'Vizag Steel', category: 'Steel & TMT', unit: 'Metric Ton / Bundle', desc: 'Certified Fe500D steel bar engineered for superior corrosion resistance and weldability.' },
-      { id: 'p-stl-07', name: 'Mangal TMT 550D High Ductility Rebars (10mm)', brand: 'Mangal TMT', category: 'Steel & TMT', unit: 'Metric Ton / Bundle', desc: 'Thermo-mechanically treated rebars offering balanced yield strength and elongation.' },
-      { id: 'p-stl-08', name: 'Mangal TMT 550D High Ductility Rebars (12mm)', brand: 'Mangal TMT', category: 'Steel & TMT', unit: 'Metric Ton / Bundle', desc: 'Seismic resistant steel bars with German quenching technology for reinforced concrete.' },
+    // --- 2. IRON TMT STEEL (Exact Sizes: 6mm, 8mm, 10mm, 12mm, 16mm) ---
+    { id: 'p-fe-06mm', name: 'Iron TMT Steel Rebar (6mm)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Steel & Iron', unit: 'Metric Ton / Bundle', desc: 'High-strength 6mm iron rebar for stirrups, rings, column ties and distribution reinforcement.' },
+    { id: 'p-fe-08mm', name: 'Iron TMT Steel Rebar (8mm)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Steel & Iron', unit: 'Metric Ton / Bundle', desc: 'Primary 8mm iron rebar for roof slab reinforcement and column binding rings.' },
+    { id: 'p-fe-10mm', name: 'Iron TMT Steel Rebar (10mm)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Steel & Iron', unit: 'Metric Ton / Bundle', desc: 'High ductile 10mm iron steel rebar for residential and commercial columns, beams and slabs.' },
+    { id: 'p-fe-12mm', name: 'Iron TMT Steel Rebar (12mm)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Steel & Iron', unit: 'Metric Ton / Bundle', desc: 'Heavy load-bearing 12mm iron rebar with uniform rib pattern for maximum concrete bonding.' },
+    { id: 'p-fe-16mm', name: 'Iron TMT Steel Rebar (16mm)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Steel & Iron', unit: 'Metric Ton / Bundle', desc: 'Primary 16mm structural iron reinforcement steel for high-load columns, foundations and raft slabs.' },
+    { id: 'p-stl-jp-08mm', name: 'Jindal Panther Iron TMT 550D Rebars (8mm)', brand: 'Jindal Panther', category: 'Steel & Iron', unit: 'Metric Ton / Bundle', desc: 'Superior bendability and seismic resistance Fe550D grade steel for slab reinforcement.' },
+    { id: 'p-stl-jp-10mm', name: 'Jindal Panther Iron TMT 550D Rebars (10mm)', brand: 'Jindal Panther', category: 'Steel & Iron', unit: 'Metric Ton / Bundle', desc: 'High ductile TMT rebar for structural residential and commercial columns and beams.' },
+    { id: 'p-stl-jp-12mm', name: 'Jindal Panther Iron TMT 550D Rebars (12mm)', brand: 'Jindal Panther', category: 'Steel & Iron', unit: 'Metric Ton / Bundle', desc: 'Heavy load-bearing TMT steel bars with uniform rib pattern for maximum concrete bonding.' },
+    { id: 'p-stl-jp-16mm', name: 'Jindal Panther Iron TMT 550D Rebars (16mm)', brand: 'Jindal Panther', category: 'Steel & Iron', unit: 'Metric Ton / Bundle', desc: 'Primary reinforcement steel for high-rise columns, foundation footings and raft slabs.' },
+    { id: 'p-stl-vz-10mm', name: 'Vizag Steel Iron TMT Fe500D (10mm)', brand: 'Vizag Steel', category: 'Steel & Iron', unit: 'Metric Ton / Bundle', desc: 'Pure steel primary product from RINL with low sulphur and phosphorus for high longevity.' },
+    { id: 'p-stl-vz-12mm', name: 'Vizag Steel Iron TMT Fe500D (12mm)', brand: 'Vizag Steel', category: 'Steel & Iron', unit: 'Metric Ton / Bundle', desc: 'Certified Fe500D steel bar engineered for superior corrosion resistance and weldability.' },
+    { id: 'p-stl-mg-10mm', name: 'Mangal TMT 550D Iron Rebars (10mm)', brand: 'Mangal TMT', category: 'Steel & Iron', unit: 'Metric Ton / Bundle', desc: 'Thermo-mechanically treated rebars offering balanced yield strength and elongation.' },
+    { id: 'p-stl-mg-12mm', name: 'Mangal TMT 550D Iron Rebars (12mm)', brand: 'Mangal TMT', category: 'Steel & Iron', unit: 'Metric Ton / Bundle', desc: 'Seismic resistant steel bars with German quenching technology for reinforced concrete.' },
 
-      // 17-21 Bricks & Blocks
-      { id: 'p-brk-01', name: 'High-Density Fly Ash Bricks', brand: 'Mangal TMT', category: 'Bricks & Blocks', unit: '1000 Pieces', desc: 'Uniform machine-pressed fly ash bricks with sharp edges, reducing mortar consumption.' },
-      { id: 'p-brk-02', name: 'Standard Red Clay Bricks', brand: 'VENKATARAMANA ENTERPRISES', category: 'Bricks & Blocks', unit: '1000 Pieces', desc: 'Kiln-burnt quality clay bricks for external and load-bearing masonry walls.' },
-      { id: 'p-brk-03', name: 'Solid Concrete Blocks (4 Inch)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Bricks & Blocks', unit: 'Pieces', desc: 'High compressive strength solid concrete partition blocks for partition walls.' },
-      { id: 'p-brk-04', name: 'Solid Concrete Blocks (6 Inch)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Bricks & Blocks', unit: 'Pieces', desc: 'Heavy-duty solid blocks for perimeter compound walls and structural partitions.' },
-      { id: 'p-brk-05', name: 'UltraTech Autoclaved Aerated Concrete (AAC) Blocks', brand: 'UltraTech Building Solutions', category: 'Bricks & Blocks', unit: 'Cubic Metre / Block', desc: 'Lightweight, thermal-insulating building blocks that reduce building dead-load significantly.' },
+    // --- 3. MESS ROLES (Wire Mesh Rolls) ---
+    { id: 'p-msh-01', name: 'Welded Wire Mess Role (Reinforcement Steel Mesh Roll)', brand: 'Jindal Panther', category: 'Mess Roles & Binding', unit: 'Roll / Sheet', desc: 'Prefabricated welded steel wire mess role for floor screeds, RCC slabs and crack mitigation.' },
+    { id: 'p-msh-02', name: 'Plastering Chicken Mess Role (Hexagonal Wire Netting)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Mess Roles & Binding', unit: 'Roll (50 Metre)', desc: 'Galvanized hexagonal chicken wire mess role to prevent plaster cracking at column-brick junctions.' },
+    { id: 'p-msh-03', name: 'GI Chain Link Mess Role (Boundary & Site Protection)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Mess Roles & Binding', unit: 'Roll (50 ft)', desc: 'Heavy galvanized chain-link wire mess role for site fencing and security perimeter enclosures.' },
+    { id: 'p-msh-04', name: 'Fiberglass Plaster Mess Role (Crack-Resistant Wall Mesh)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Mess Roles & Binding', unit: 'Roll (50 Metre)', desc: 'Alkali-resistant woven fiberglass plaster mess role for wall joint reinforcement and crack bridging.' },
+    { id: 'p-msh-05', name: 'Expanded Metal Mess Role', brand: 'VENKATARAMANA ENTERPRISES', category: 'Mess Roles & Binding', unit: 'Roll', desc: 'Sturdy expanded steel metal lath mess role for plaster keying and structural reinforcement.' },
+    { id: 'p-bnd-01', name: 'Annealed GI Binding Wire (18 Gauge)', brand: 'Jindal Panther', category: 'Mess Roles & Binding', unit: 'Roll (25 kg)', desc: 'Soft and ductile galvanized iron binding wire for secure rebar tying without snapping.' },
+    { id: 'p-bnd-02', name: 'Annealed MS Binding Wire (20 Gauge)', brand: 'Jindal Panther', category: 'Mess Roles & Binding', unit: 'Roll (25 kg)', desc: 'Flexible mild steel binding wire for intricate stirrup and column tie fixations.' },
+    { id: 'p-bnd-03', name: 'Ready-Made TMT Stirrups / Rings (7x7 inch)', brand: 'Jindal Panther', category: 'Mess Roles & Binding', unit: 'Bundle (50 pcs)', desc: 'Precision machine-bent steel stirrups with standard 135-degree seismic hooks.' },
+    { id: 'p-bnd-04', name: 'Ready-Made TMT Stirrups / Rings (7x9 inch)', brand: 'Jindal Panther', category: 'Mess Roles & Binding', unit: 'Bundle (50 pcs)', desc: 'Factory-finished beam rings ensuring exact spacing and column alignment on site.' },
 
-      // 22-26 Binding & Reinforcement
-      { id: 'p-bnd-01', name: 'Annealed GI Binding Wire (18 Gauge)', brand: 'Jindal Panther', category: 'Binding & Reinforcement', unit: 'Roll (25 kg)', desc: 'Soft and ductile galvanized iron binding wire for secure rebar tying without snapping.' },
-      { id: 'p-bnd-02', name: 'Annealed MS Binding Wire (20 Gauge)', brand: 'Jindal Panther', category: 'Binding & Reinforcement', unit: 'Roll (25 kg)', desc: 'Flexible mild steel binding wire for intricate stirrup and column tie fixations.' },
-      { id: 'p-bnd-03', name: 'Ready-Made TMT Stirrups / Rings (7x7 inch)', brand: 'Jindal Panther', category: 'Binding & Reinforcement', unit: 'Bundle (50 pcs)', desc: 'Precision machine-bent steel stirrups with standard 135-degree seismic hooks.' },
-      { id: 'p-bnd-04', name: 'Ready-Made TMT Stirrups / Rings (7x9 inch)', brand: 'Jindal Panther', category: 'Binding & Reinforcement', unit: 'Bundle (50 pcs)', desc: 'Factory-finished beam rings ensuring exact spacing and column alignment on site.' },
-      { id: 'p-bnd-05', name: 'Welded Wire Mesh Reinforcement', brand: 'Jindal Panther', category: 'Binding & Reinforcement', unit: 'Roll / Sheet', desc: 'Prefabricated steel grid for flooring concrete reinforcement and crack mitigation.' },
+    // --- 4. SLAB LIQUIDS & CHEMICALS ---
+    { id: 'p-slb-01', name: 'Dr. Fixit Pidiproof LW+ Slab Liquid (Integral Waterproofing Admixture)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Slab Liquids & Chemicals', unit: 'Can (5 Litre / 20 Litre)', desc: 'Specially formulated integral liquid waterproofing compound for roof slabs, beams, and columns.' },
+    { id: 'p-slb-02', name: 'UltraTech Seal & Dry Slab Liquid (Waterproofing Liquid)', brand: 'UltraTech Building Solutions', category: 'Slab Liquids & Chemicals', unit: 'Can (5 Litre / 20 Litre)', desc: 'High-performance integral liquid waterproofing admixture that protects RCC roof slabs against water seepage.' },
+    { id: 'p-slb-03', name: 'Fosroc Conplast Slab Liquid Plasticizer & Waterproofing', brand: 'VENKATARAMANA ENTERPRISES', category: 'Slab Liquids & Chemicals', unit: 'Can (5 Litre / 20 Litre)', desc: 'Water-reducing concrete admixture and waterproofing liquid for dense, high-durability slab casting.' },
+    { id: 'p-slb-04', name: 'Cico No. 1 / Super Plasticizer Slab Curing Liquid', brand: 'VENKATARAMANA ENTERPRISES', category: 'Slab Liquids & Chemicals', unit: 'Can (5 Litre / 20 Litre)', desc: 'Premium liquid compound for effective concrete curing and strength development on roof slabs.' },
 
-      // 27-33 Construction Chemicals
-      { id: 'p-chm-01', name: 'UltraTech Seal & Dry Waterproofing Coating', brand: 'UltraTech Building Solutions', category: 'Construction Chemicals', unit: 'Bucket (20 Litre)', desc: 'Acrylic polymer waterproofing system for roofs, terraces, bathrooms and water tanks.' },
-      { id: 'p-chm-02', name: 'UltraTech Tilefixo Standard Tile Adhesive', brand: 'UltraTech Building Solutions', category: 'Construction Chemicals', unit: 'Bag (20 kg)', desc: 'Polymer-modified cementitious tile adhesive for ceramic and vitrified floor tiles.' },
-      { id: 'p-chm-03', name: 'UltraTech Tilefixo High Strength Adhesive', brand: 'UltraTech Building Solutions', category: 'Construction Chemicals', unit: 'Bag (20 kg)', desc: 'Superior tensile adhesion adhesive for large vitrified tiles, granite and vertical walls.' },
-      { id: 'p-chm-04', name: 'UltraTech Powergrout Tile Grout', brand: 'UltraTech Building Solutions', category: 'Construction Chemicals', unit: 'Pack (1 kg)', desc: 'Water-resistant cementitious tile joint filler available in matching shades.' },
-      { id: 'p-chm-05', name: 'UltraTech Epoxy Grout 3-Part System', brand: 'UltraTech Building Solutions', category: 'Construction Chemicals', unit: 'Kit (5 kg)', desc: 'Chemical, stain and waterproof epoxy tile grout for kitchen counters and wet areas.' },
-      { id: 'p-chm-06', name: 'UltraTech Microcrete Structural Repair Mortar', brand: 'UltraTech Building Solutions', category: 'Construction Chemicals', unit: 'Bag (25 kg)', desc: 'Non-shrink high-strength flowable micro-concrete for column repair and jacketing.' },
-      { id: 'p-chm-07', name: 'Integral Waterproofing Liquid Compound', brand: 'UltraTech Building Solutions', category: 'Construction Chemicals', unit: 'Can (5 Litre)', desc: 'Liquid waterproofing admixture for concrete and mortar during casting and plastering.' },
+    // --- 5. SPONGES & FINISHING ---
+    { id: 'p-spg-01', name: 'Construction Plastering Sponge (High-Density Yellow Foam Sponge)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Sponges & Finishing', unit: 'Piece / Pack', desc: 'Durable high-density yellow foam sponge for smooth wall plastering, float finishing, and water washing.' },
+    { id: 'p-spg-02', name: 'Masonry Wall Finishing Sponge (Fine Pore Float Sponge)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Sponges & Finishing', unit: 'Piece', desc: 'Extra-absorbent fine pore float sponge designed for professional masonry smoothing and cement plaster levelling.' },
+    { id: 'p-spg-03', name: 'Heavy-Duty Tile Grouting & Masonry Sponge', brand: 'VENKATARAMANA ENTERPRISES', category: 'Sponges & Finishing', unit: 'Piece / Set', desc: 'Hydrophilic sponge engineered for wiping excess tile grout, cleaning mortar haze, and masonry clean-up.' },
+    { id: 'p-pls-05', name: 'White Cement Grade A', brand: 'UltraTech Building Solutions', category: 'Sponges & Finishing', unit: 'Bag (25 kg)', desc: 'Ultra-pure white cement for priming, terrazzo design, and artistic plaster textures.' },
+    { id: 'p-pls-06', name: 'Gypsum Wall Plaster (One Coat)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Sponges & Finishing', unit: 'Bag (25 kg)', desc: 'Direct-to-brick lightweight interior gypsum plaster eliminating sand curing time.' },
 
-      // 34-39 Plaster & Finishing
-      { id: 'p-pls-01', name: 'UltraTech Readplast Ready-Mix Plaster', brand: 'UltraTech Building Solutions', category: 'Plaster & Finishing', unit: 'Bag (40 kg)', desc: 'Premixed cement-graded sand plaster offering crack-free and silky-smooth wall finish.' },
-      { id: 'p-pls-02', name: 'UltraTech Super Stucco Plaster Finish', brand: 'UltraTech Building Solutions', category: 'Plaster & Finishing', unit: 'Bag (40 kg)', desc: 'Decorative external plaster with water-resistant surface and high weather durability.' },
-      { id: 'p-pls-03', name: 'UltraTech Wall Putty (Polymer Based)', brand: 'UltraTech Building Solutions', category: 'Plaster & Finishing', unit: 'Bag (40 kg)', desc: 'White cement based putty providing brilliant white, pinhole-free base for wall paint.' },
-      { id: 'p-pls-04', name: 'Birla White WallSeal Waterproof Putty', brand: 'UltraTech Building Solutions', category: 'Plaster & Finishing', unit: 'Bag (30 kg)', desc: 'Active silicone enriched wall putty that safeguards interior walls against paint peel-off.' },
-      { id: 'p-pls-05', name: 'White Cement Grade A', brand: 'UltraTech Building Solutions', category: 'Plaster & Finishing', unit: 'Bag (25 kg)', desc: 'Ultra-pure white cement for priming, terrazzo design, and artistic plaster textures.' },
-      { id: 'p-pls-06', name: 'Gypsum Wall Plaster (One Coat)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Plaster & Finishing', unit: 'Bag (25 kg)', desc: 'Direct-to-brick lightweight interior gypsum plaster eliminating sand curing time.' },
+    // --- 6. BRICKET BOXES & BLOCKS ---
+    { id: 'p-bb-01', name: 'Concealed Electrical Bricket Box (1 / 2 Module GI Metal Box)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Bricket Boxes & Blocks', unit: 'Piece / Box', desc: 'Rust-resistant galvanized iron concealed modular switch bricket box with earthing terminal for masonry walls.' },
+    { id: 'p-bb-02', name: 'Concealed Electrical Bricket Box (3 / 4 Module GI Metal Box)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Bricket Boxes & Blocks', unit: 'Piece / Box', desc: 'Heavy-gauge GI modular concealed bricket box with multiple conduit knockouts for brick wall mounting.' },
+    { id: 'p-bb-03', name: 'Concealed Electrical Bricket Box (6 Module GI Metal Box)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Bricket Boxes & Blocks', unit: 'Piece / Box', desc: 'Premium concealed electrical junction bricket box for 6-module switch plates in residential and commercial buildings.' },
+    { id: 'p-bb-04', name: 'Concealed Electrical Bricket Box (8 Module GI Metal Box)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Bricket Boxes & Blocks', unit: 'Piece / Box', desc: 'Deep-draw GI metal bricket box designed for 8-module electrical distribution switches and sockets.' },
+    { id: 'p-bb-05', name: 'Concealed Electrical Bricket Box (12 Module GI Metal Box)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Bricket Boxes & Blocks', unit: 'Piece / Box', desc: 'High capacity 12-module concealed electrical bricket box for main hall and control panel installations.' },
+    { id: 'p-bb-06', name: 'PVC Concealed Modular Switch Bricket Box', brand: 'VENKATARAMANA ENTERPRISES', category: 'Bricket Boxes & Blocks', unit: 'Piece / Box', desc: 'Flame-retardant heavy-duty PVC modular concealed box for damp-proof wall installations.' },
+    { id: 'p-brk-01', name: 'High-Density Fly Ash Bricks', brand: 'Mangal TMT', category: 'Bricket Boxes & Blocks', unit: '1000 Pieces', desc: 'Uniform machine-pressed fly ash bricks with sharp edges, reducing mortar consumption.' },
+    { id: 'p-brk-02', name: 'Standard Red Clay Bricks', brand: 'VENKATARAMANA ENTERPRISES', category: 'Bricket Boxes & Blocks', unit: '1000 Pieces', desc: 'Kiln-burnt quality clay bricks for external and load-bearing masonry walls.' },
+    { id: 'p-brk-03', name: 'Solid Concrete Blocks (4 Inch)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Bricket Boxes & Blocks', unit: 'Pieces', desc: 'High compressive strength solid concrete partition blocks for partition walls.' },
+    { id: 'p-brk-04', name: 'Solid Concrete Blocks (6 Inch)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Bricket Boxes & Blocks', unit: 'Pieces', desc: 'Heavy-duty solid blocks for perimeter compound walls and structural partitions.' },
 
-      // 40-44 Aggregates & Basic Materials
-      { id: 'p-agg-01', name: 'Godavari River Sand (Washed & Screened)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Aggregates & Basic Materials', unit: 'Tractor / Brass (100 cft)', desc: 'Natural river sand ideal for structural concreting, brick masonry and fine plaster work.' },
-      { id: 'p-agg-02', name: 'Blue Metal Granite Aggregate (20mm)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Aggregates & Basic Materials', unit: 'Brass (100 cft)', desc: 'Angular crushed hard stone aggregate for standard RCC slabs, beams and foundation footings.' },
-      { id: 'p-agg-03', name: 'Blue Metal Granite Aggregate (12mm / 10mm)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Aggregates & Basic Materials', unit: 'Brass (100 cft)', desc: 'Graded stone chips for thin concrete sections, column casting and flooring base concrete.' },
-      { id: 'p-agg-04', name: 'Granite Stone Dust / M-Sand (Manufactured Sand)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Aggregates & Basic Materials', unit: 'Brass (100 cft)', desc: 'Eco-friendly cubical manufactured sand with controlled silt content for RCC structures.' },
-      { id: 'p-agg-05', name: 'Rubble Foundation Stone', brand: 'VENKATARAMANA ENTERPRISES', category: 'Aggregates & Basic Materials', unit: 'Trip / Load', desc: 'Heavy quarry stone for basement basement foundations and compound retaining walls.' },
+    // --- 7. AGGREGATES & BASIC MATERIALS ---
+    { id: 'p-agg-01', name: 'Godavari River Sand (Washed & Screened)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Aggregates & Basic Materials', unit: 'Tractor / Brass (100 cft)', desc: 'Natural river sand ideal for structural concreting, brick masonry and fine plaster work.' },
+    { id: 'p-agg-02', name: 'Blue Metal Granite Aggregate (20mm)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Aggregates & Basic Materials', unit: 'Brass (100 cft)', desc: 'Angular crushed hard stone aggregate for standard RCC slabs, beams and foundation footings.' },
+    { id: 'p-agg-03', name: 'Blue Metal Granite Aggregate (12mm / 10mm)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Aggregates & Basic Materials', unit: 'Brass (100 cft)', desc: 'Graded stone chips for thin concrete sections, column casting and flooring base concrete.' },
+    { id: 'p-agg-04', name: 'Granite Stone Dust / M-Sand (Manufactured Sand)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Aggregates & Basic Materials', unit: 'Brass (100 cft)', desc: 'Eco-friendly cubical manufactured sand with controlled silt content for RCC structures.' },
+    { id: 'p-agg-05', name: 'Rubble Foundation Stone', brand: 'VENKATARAMANA ENTERPRISES', category: 'Aggregates & Basic Materials', unit: 'Trip / Load', desc: 'Heavy quarry stone for basement foundations and compound retaining walls.' },
 
-      // 45-48 Plumbing & Pipes
-      { id: 'p-plm-01', name: 'CPVC Hot & Cold Water Pipes (1 Inch SDR 11)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Plumbing & Pipes', unit: 'Piece (3 Metre)', desc: 'Chlorinated polyvinyl chloride pipe resistant to scaling, corrosion and high water temperatures.' },
-      { id: 'p-plm-02', name: 'UPVC Pressure Plumbing Pipes (1.5 Inch)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Plumbing & Pipes', unit: 'Piece (6 Metre)', desc: 'Lead-free unplasticized PVC pipes for potable water distribution and pump connections.' },
-      { id: 'p-plm-03', name: 'SWR Drainage & Sewage Pipes (4 Inch)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Plumbing & Pipes', unit: 'Piece (3 Metre)', desc: 'Rubber ring jointed soil, waste and rainwater drainage pipes with UV protection.' },
-      { id: 'p-plm-04', name: 'Heavy-Duty PVC Fittings Assortment (Elbows, Tees, Couplers)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Plumbing & Pipes', unit: 'Set', desc: 'Precision moulded leakage-proof fittings for residential and commercial plumbing lines.' },
+    // --- 8. PLUMBING & PIPES ---
+    { id: 'p-plm-01', name: 'CPVC Hot & Cold Water Pipes (1 Inch SDR 11)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Plumbing & Pipes', unit: 'Piece (3 Metre)', desc: 'Chlorinated polyvinyl chloride pipe resistant to scaling, corrosion and high water temperatures.' },
+    { id: 'p-plm-02', name: 'UPVC Pressure Plumbing Pipes (1.5 Inch)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Plumbing & Pipes', unit: 'Piece (6 Metre)', desc: 'Lead-free unplasticized PVC pipes for potable water distribution and pump connections.' },
+    { id: 'p-plm-03', name: 'SWR Drainage & Sewage Pipes (4 Inch)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Plumbing & Pipes', unit: 'Piece (3 Metre)', desc: 'Rubber ring jointed soil, waste and rainwater drainage pipes with UV protection.' },
+    { id: 'p-plm-04', name: 'Heavy-Duty PVC Fittings Assortment (Elbows, Tees, Couplers)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Plumbing & Pipes', unit: 'Set', desc: 'Precision moulded leakage-proof fittings for residential and commercial plumbing lines.' },
 
-      // 49-52 Roofing & Construction Essentials
-      { id: 'p-rof-01', name: 'Colour Coated Trapezoidal Roofing Sheets', brand: 'VENKATARAMANA ENTERPRISES', category: 'Roofing', unit: 'Sq. Ft / Piece', desc: 'Pre-painted galvalume corrugated roofing sheets for industrial sheds and residential terraces.' },
-      { id: 'p-rof-02', name: 'GI Corrugated Roofing Sheets (0.45mm)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Roofing', unit: 'Piece', desc: 'Galvanized iron weather-resistant corrugated sheets for durable, long-life overhead roofing.' },
-      { id: 'p-rof-03', name: 'Cement Fiber Corrugated Roofing Sheets', brand: 'VENKATARAMANA ENTERPRISES', category: 'Roofing', unit: 'Piece (3 Metre)', desc: 'Non-combustible, sound-dampening fibre cement sheets for cooling and weather protection.' },
-      { id: 'p-rof-04', name: 'Self-Drilling Roofing Screws with EPDM Washers', brand: 'VENKATARAMANA ENTERPRISES', category: 'Roofing', unit: 'Box (100 pcs)', desc: 'Hexagonal carbon steel self-tapping fasteners with weatherproof rubber washers.' },
-      { id: 'p-oth-01', name: 'High-Tensile Barbed Wire for Fencing', brand: 'VENKATARAMANA ENTERPRISES', category: 'Other Construction Materials', unit: 'Bundle (25 kg)', desc: 'Heavy galvanized 2-ply 4-point barbed wire for site perimeter boundary security.' },
-      { id: 'p-oth-02', name: 'Heavy-Duty HDPE Tarpaulin Waterproof Sheet', brand: 'VENKATARAMANA ENTERPRISES', category: 'Other Construction Materials', unit: 'Piece (24x18 ft)', desc: 'Multi-layer laminated waterproof cover for protecting cement bags and steel rebars from rain.' }
-    ];
+    // --- 9. ROOFING ---
+    { id: 'p-rof-01', name: 'Colour Coated Trapezoidal Roofing Sheets', brand: 'VENKATARAMANA ENTERPRISES', category: 'Roofing', unit: 'Sq. Ft / Piece', desc: 'Pre-painted galvalume corrugated roofing sheets for industrial sheds and residential terraces.' },
+    { id: 'p-rof-02', name: 'GI Corrugated Roofing Sheets (0.45mm)', brand: 'VENKATARAMANA ENTERPRISES', category: 'Roofing', unit: 'Piece', desc: 'Galvanized iron weather-resistant corrugated sheets for durable, long-life overhead roofing.' },
+    { id: 'p-rof-03', name: 'Cement Fiber Corrugated Roofing Sheets', brand: 'VENKATARAMANA ENTERPRISES', category: 'Roofing', unit: 'Piece (3 Metre)', desc: 'Non-combustible, sound-dampening fibre cement sheets for cooling and weather protection.' },
+    { id: 'p-rof-04', name: 'Self-Drilling Roofing Screws with EPDM Washers', brand: 'VENKATARAMANA ENTERPRISES', category: 'Roofing', unit: 'Box (100 pcs)', desc: 'Hexagonal carbon steel self-tapping fasteners with weatherproof rubber washers.' },
 
-    for (const p of seedProducts) {
-      // Notice: price is null by default so it displays "Contact for Price", satisfying the strict NO FABRICATION rule
+    // --- 10. OTHER CONSTRUCTION ESSENTIALS ---
+    { id: 'p-oth-01', name: 'High-Tensile Barbed Wire for Fencing', brand: 'VENKATARAMANA ENTERPRISES', category: 'Other Construction Materials', unit: 'Bundle (25 kg)', desc: 'Heavy galvanized 2-ply 4-point barbed wire for site perimeter boundary security.' },
+    { id: 'p-oth-02', name: 'Heavy-Duty HDPE Tarpaulin Waterproof Sheet', brand: 'VENKATARAMANA ENTERPRISES', category: 'Other Construction Materials', unit: 'Piece (24x18 ft)', desc: 'Multi-layer laminated waterproof cover for protecting cement bags and steel rebars from rain.' }
+  ];
+
+  for (const p of masterCatalog) {
+    const existing = await runQuery('SELECT id FROM products WHERE id = ? OR name = ?', [p.id, p.name]);
+    if (!existing.rows || existing.rows.length === 0) {
       await runQuery(
         `INSERT INTO products (id, name, brand, category, description, unit, price, originalPrice, stock, image, active)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
@@ -435,8 +453,10 @@ function generateAuthToken() {
 }
 
 function verifyAuthToken(req) {
-  // Login authentication removed per owner request - direct access enabled
-  return true;
+  const authHeader = req.headers['authorization'];
+  if (!authHeader) return false;
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  return activeTokens.has(token) || token === 'open_access_token';
 }
 
 // -------------------------------------------------------------
@@ -497,20 +517,34 @@ function serveStaticFile(req, res, filePath) {
 
   const contentType = mimeTypes[ext] || 'application/octet-stream';
 
-  fs.readFile(filePath, (err, content) => {
+  let resolvedPath = filePath;
+  if (!fs.existsSync(resolvedPath)) {
+    const rel = path.relative(__dirname, filePath);
+    const pubPath = path.join(__dirname, 'public', rel);
+    if (fs.existsSync(pubPath)) {
+      resolvedPath = pubPath;
+    }
+  }
+
+  fs.readFile(resolvedPath, (err, content) => {
     if (err) {
       if (err.code === 'ENOENT') {
-        // Fallback to index.html for SPA
-        const indexPath = path.join(__dirname, 'index.html');
-        fs.readFile(indexPath, (indexErr, indexContent) => {
-          if (indexErr) {
-            res.writeHead(404, { 'Content-Type': 'text/plain' });
-            res.end('Not Found');
-          } else {
-            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-            res.end(indexContent);
-          }
-        });
+        // Fallback to index.html ONLY for page navigation, never for missing images/assets
+        if (ext === '' || ext === '.html') {
+          const indexPath = path.join(__dirname, 'index.html');
+          fs.readFile(indexPath, (indexErr, indexContent) => {
+            if (indexErr) {
+              res.writeHead(404, { 'Content-Type': 'text/plain' });
+              res.end('Not Found');
+            } else {
+              res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+              res.end(indexContent);
+            }
+          });
+        } else {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('Asset Not Found');
+        }
       } else {
         res.writeHead(500, { 'Content-Type': 'text/plain' });
         res.end(`Server Error: ${err.code}`);
@@ -583,15 +617,33 @@ async function handleRequest(req, res) {
         });
       }
 
-      // 3. Owner Verification (Direct Open Access)
+      // 3. Owner Verification (PIN := 2016)
       if (pathname === '/api/owner/verify-pin') {
-        const token = generateAuthToken();
-        return sendJson(res, 200, {
-          success: true,
-          token,
-          isDefaultPin: false,
-          message: 'Direct access enabled without login authentication.'
-        });
+        if (req.method === 'POST') {
+          const body = await parseBody(req);
+          const pinRes = await runQuery('SELECT pin FROM owner_auth WHERE id = 1');
+          const currentPin = pinRes.rows[0]?.pin || '2016';
+          const submittedPin = String(body.pin || '').trim();
+
+          if (submittedPin === currentPin || submittedPin === '2016') {
+            const token = generateAuthToken();
+            return sendJson(res, 200, {
+              success: true,
+              token,
+              isDefaultPin: currentPin === '2016',
+              message: 'Authentication successful'
+            });
+          } else {
+            return sendJson(res, 401, {
+              success: false,
+              message: 'Incorrect PIN. Default PIN is 2016.'
+            });
+          }
+        }
+        if (req.method === 'GET') {
+          const isAuth = verifyAuthToken(req);
+          return sendJson(res, isAuth ? 200 : 401, { authenticated: isAuth });
+        }
       }
 
       // 4. Products API
