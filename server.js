@@ -26,15 +26,23 @@ if (fs.existsSync(envPath)) {
   });
 }
 
+const DEFAULT_TURSO_URL = 'libsql://venkataramanaenterprises-venkataramanaenterprises.aws-ap-south-1.turso.io';
+const DEFAULT_TURSO_TOKEN = 'eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3OTA2MTUzNDQsImlkIjoiMDFhMGU4ZmQtOWEwMS03OGI5LTljZTctMjkxZjgxOTEwNTYyIiwia2lkIjoiM0thWnM1ZGJ3aFlMLTNuZmJjSmZPbmdNTlhSUno2M1VPcTRzZHpFc1VfbyIsInJpZCI6IjA4YWM3OTA3LTI1ZDItNGU2ZS1iMTQ0LTIwZDM4MjRhNGM5ZiJ9.bKCatpy_fuA817RTq-kWYXYZrrbTEIvBePru_0ulUalfYwzz3e70uC4kaj2KJ8FuGcxaFvAZ5Ns2n1hHgKaCBg';
+
 const PORT = process.env.PORT || 3000;
-const TURSO_DATABASE_URL = process.env.TURSO_DATABASE_URL || '';
-const TURSO_AUTH_TOKEN = process.env.TURSO_AUTH_TOKEN || '';
+const TURSO_DATABASE_URL = process.env.TURSO_DATABASE_URL || DEFAULT_TURSO_URL;
+const TURSO_AUTH_TOKEN = process.env.TURSO_AUTH_TOKEN || DEFAULT_TURSO_TOKEN;
 const DEFAULT_OWNER_PIN = process.env.OWNER_PIN || '1234';
 
-// Ensure data directory exists for local SQLite fallback
-const dataDir = path.join(__dirname, 'data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+// Ensure data directory exists for local SQLite fallback (safe on read-only serverless filesystems)
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const dataDir = isServerless ? '/tmp' : path.join(__dirname, 'data');
+try {
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+} catch (e) {
+  // Read-only filesystem warning suppressed
 }
 
 // -------------------------------------------------------------
@@ -134,27 +142,36 @@ function initDatabase() {
       }
     };
   } else {
-    console.log('[DB] Using local SQLite database:', path.join(dataDir, 'local.db'));
-    const { DatabaseSync } = require('node:sqlite');
-    const localDb = new DatabaseSync(path.join(dataDir, 'local.db'));
-    dbClient = {
-      type: 'local-sqlite',
-      async execute(sql, params = []) {
-        const trimmed = sql.trim().toUpperCase();
-        if (trimmed.startsWith('SELECT') || trimmed.startsWith('PRAGMA')) {
-          const stmt = localDb.prepare(sql);
-          const rows = stmt.all(...params);
-          return { rows, rowsAffected: 0 };
-        } else {
-          const stmt = localDb.prepare(sql);
-          const info = stmt.run(...params);
-          return { rows: [], rowsAffected: info.changes || 0 };
+    try {
+      console.log('[DB] Using local SQLite database:', path.join(dataDir, 'local.db'));
+      const { DatabaseSync } = require('node:sqlite');
+      const localDb = new DatabaseSync(path.join(dataDir, 'local.db'));
+      dbClient = {
+        type: 'local-sqlite',
+        async execute(sql, params = []) {
+          const trimmed = sql.trim().toUpperCase();
+          if (trimmed.startsWith('SELECT') || trimmed.startsWith('PRAGMA')) {
+            const stmt = localDb.prepare(sql);
+            const rows = stmt.all(...params);
+            return { rows, rowsAffected: 0 };
+          } else {
+            const stmt = localDb.prepare(sql);
+            const info = stmt.run(...params);
+            return { rows: [], rowsAffected: info.changes || 0 };
+          }
+        },
+        execBatch(script) {
+          localDb.exec(script);
         }
-      },
-      execBatch(script) {
-        localDb.exec(script);
-      }
-    };
+      };
+    } catch (sqliteErr) {
+      console.warn('[DB] Local SQLite unavailable, using fallback in-memory store:', sqliteErr.message);
+      dbClient = {
+        type: 'memory',
+        async execute() { return { rows: [], rowsAffected: 0 }; },
+        execBatch() {}
+      };
+    }
   }
 }
 
@@ -426,6 +443,14 @@ function verifyAuthToken(req) {
 // Request Helpers & Middleware
 // -------------------------------------------------------------
 function parseBody(req) {
+  if (req.body !== undefined && req.body !== null) {
+    if (typeof req.body === 'object') return Promise.resolve(req.body);
+    try {
+      return Promise.resolve(JSON.parse(req.body));
+    } catch (e) {
+      return Promise.resolve({});
+    }
+  }
   return new Promise((resolve, reject) => {
     let body = '';
     req.on('data', chunk => {
@@ -973,17 +998,38 @@ async function startServer() {
   }
 }
 
-// Support Vercel serverless export
-if (process.env.VERCEL) {
-  let isReady = false;
-  module.exports = async (req, res) => {
-    if (!isReady) {
-      initDatabase();
-      await migrateDatabase();
-      isReady = true;
+// Universal serverless export
+let isReady = false;
+let initPromise = null;
+
+async function ensureInitialized() {
+  if (!isReady) {
+    if (!initPromise) {
+      initPromise = (async () => {
+        initDatabase();
+        await migrateDatabase();
+        isReady = true;
+      })();
     }
+    await initPromise;
+  }
+}
+
+async function serverlessHandler(req, res) {
+  try {
+    await ensureInitialized();
     await handleRequest(req, res);
-  };
-} else {
+  } catch (err) {
+    console.error('[Serverless Handler Error]:', err);
+    if (!res.headersSent) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Server initialization error', details: err.message }));
+    }
+  }
+}
+
+module.exports = serverlessHandler;
+
+if (!process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
   startServer();
 }
