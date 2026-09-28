@@ -2960,7 +2960,7 @@
       const fileEl = document.getElementById('wa-modal-filename');
       if (fileEl) fileEl.textContent = filename;
       const linkEl = document.getElementById('wa-modal-view-online-btn');
-      if (linkEl) linkEl.href = `/invoice.html?id=${encodeURIComponent(bill.id || bill.invNo)}`;
+      if (linkEl) linkEl.href = `/invoice?id=${encodeURIComponent(bill.id || bill.invNo)}`;
       modal.classList.add('active');
     }
 
@@ -3248,7 +3248,7 @@
     function sendInvoiceOnWhatsApp() {
       if (!lastSavedBill) return;
       const b = lastSavedBill;
-      const invoiceOnlineUrl = `${window.location.origin}/invoice.html?id=${encodeURIComponent(b.id || b.invNo)}`;
+      const invoiceOnlineUrl = `${window.location.origin}/invoice?id=${encodeURIComponent(b.id || b.invNo)}`;
 
       let text = `*VENKATARAMANA ENTERPRISES*\n`;
       text += `_ONE STOP SOLUTION FOR BUILDING SOLUTION_\n`;
