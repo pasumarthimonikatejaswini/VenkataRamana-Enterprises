@@ -3,10 +3,6 @@
   "cleanUrls": true,
   "rewrites": [
     {
-      "source": "/api/:match*",
-      "destination": "/api"
-    },
-    {
       "source": "/invoice",
       "destination": "/invoice.html"
     }

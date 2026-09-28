@@ -537,8 +537,12 @@ async function handleRequest(req, res) {
     return;
   }
 
-  const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  const pathname = parsedUrl.pathname;
+  const rawUrl = req.headers['x-matched-path'] || req.url || '/';
+  const parsedUrl = new URL(rawUrl, `http://${req.headers.host || 'localhost'}`);
+  let pathname = parsedUrl.pathname;
+  if (pathname.includes('[...all]') || pathname.endsWith('index.js')) {
+    pathname = (req.url || '/').split('?')[0];
+  }
 
   // ---------------- API Routes ----------------
   if (pathname.startsWith('/api/')) {
